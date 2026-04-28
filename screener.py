@@ -835,3 +835,234 @@ def build_signal_fn(strategy: str, params: dict) -> Callable:
         return fn
 
     raise ValueError(f'Unknown strategy: {strategy}')
+
+
+# ── Screen functions ──────────────────────────────────────────────────────────
+
+from data import load_ticker_data
+from tickers import SP500_TICKERS, NDX100_TICKERS, MIDCAP_TICKERS, SMALLCAP_TICKERS, CRYPTO_TICKERS
+
+
+def _equity_tickers() -> list[str]:
+    return list(set(SP500_TICKERS + NDX100_TICKERS + MIDCAP_TICKERS + SMALLCAP_TICKERS))
+
+
+def _compute_optimized_score(df: pd.DataFrame, strategy: str, params: dict, config: dict) -> dict | None:
+    """Run strategy signal on last bar. df must have lowercase columns."""
+    if df is None or len(df) < 260:
+        return None
+    try:
+        import pandas_ta as ta
+    except ImportError:
+        return None
+    try:
+        fn = build_signal_fn(strategy, params)
+    except Exception:
+        return None
+    df_titled = df.rename(columns=str.title)
+    if not fn(df_titled, len(df_titled) - 1):
+        return None
+    close = df['close']
+    volume = df['volume'].values
+    rsi_s = ta.rsi(close, length=14)
+    rsi = float(rsi_s.iloc[-1]) if rsi_s is not None and len(rsi_s) else None
+    avg_vol = np.mean(volume[-21:-1]) if len(volume) >= 21 else np.mean(volume)
+    vol_ratio = float(volume[-1]) / avg_vol if avg_vol > 0 else 1.0
+    score = config.get('test_return', 0) / 100.0
+    return {
+        'rsi': round(rsi, 1) if rsi is not None and not np.isnan(rsi) else None,
+        'vol_ratio': round(vol_ratio, 2),
+        'score': round(score, 4),
+        'strategy_name': strategy,
+        'strategy_confidence': config.get('confidence', 'LOW'),
+    }
+
+
+def screen(top_n: int = 10, interval: str = '1d') -> list[dict]:
+    """Basic composite screener across equity universe."""
+    candidates = []
+    for ticker in _equity_tickers():
+        try:
+            df = load_ticker_data(ticker, years=2, interval=interval)
+            metrics = _compute_score(df)
+            if metrics is not None:
+                candidates.append({'ticker': ticker, **metrics})
+        except Exception as e:
+            logger.debug(f'Screener skip {ticker}: {e}')
+    candidates.sort(key=lambda x: x['score'], reverse=True)
+    return candidates[:top_n]
+
+
+def screen_dip(top_n: int = 10, interval: str = '1d') -> list[dict]:
+    """Dip-buy screener: oversold quality stocks during sell-offs."""
+    try:
+        import pandas_ta as ta
+    except ImportError:
+        return []
+    candidates = []
+    min_bars = 50 if interval != '1d' else 200
+    for ticker in _equity_tickers():
+        try:
+            df = load_ticker_data(ticker, years=2, interval=interval)
+            if df is None or len(df) < min_bars:
+                continue
+            close = df['close']; volume = df['volume'].values
+            price = float(close.iloc[-1])
+            if price < MIN_PRICE:
+                continue
+            rsi_s = ta.rsi(close, length=14)
+            if rsi_s is None or len(rsi_s) == 0:
+                continue
+            rsi = float(rsi_s.iloc[-1])
+            if np.isnan(rsi) or rsi >= DIP_RSI_MAX:
+                continue
+            avg_vol = np.mean(volume[-21:-1]) if len(volume) >= 21 else np.mean(volume)
+            vol_ratio = float(volume[-1]) / avg_vol if avg_vol > 0 else 1.0
+            if vol_ratio < DIP_VOL_MIN:
+                continue
+            sma200_s = ta.sma(close, length=200)
+            if sma200_s is None or len(sma200_s) == 0:
+                continue
+            sma200 = float(sma200_s.iloc[-1])
+            if np.isnan(sma200) or sma200 <= 0:
+                continue
+            drawdown = (sma200 - price) / sma200
+            if drawdown > DIP_MAX_DRAWDOWN:
+                continue
+            rsi_score = (DIP_RSI_MAX - rsi) / DIP_RSI_MAX
+            vol_score = min(vol_ratio / 5.0, 1.0)
+            sma200_proximity = max(0, 1 - drawdown / DIP_MAX_DRAWDOWN)
+            score = rsi_score * 0.5 + vol_score * 0.3 + sma200_proximity * 0.2
+            candidates.append({
+                'ticker': ticker, 'rsi': round(rsi, 1),
+                'vol_ratio': round(vol_ratio, 2), 'score': round(score, 4),
+                'above_sma50': False, 'drawdown_from_sma200_pct': round(drawdown * 100, 1),
+            })
+        except Exception as e:
+            logger.debug(f'Dip screener skip {ticker}: {e}')
+    candidates.sort(key=lambda x: x['score'], reverse=True)
+    return candidates[:top_n]
+
+
+def screen_breakout(top_n: int = 5, interval: str = '1d') -> list[dict]:
+    """Breakout: new 20-bar high + 2× volume + RSI 50-80."""
+    candidates = []
+    for ticker in _equity_tickers():
+        try:
+            df = load_ticker_data(ticker, years=2, interval=interval)
+            metrics = _compute_breakout_score(df)
+            if metrics is not None:
+                candidates.append({'ticker': ticker, **metrics})
+        except Exception as e:
+            logger.debug(f'Breakout screener skip {ticker}: {e}')
+    candidates.sort(key=lambda x: x['score'], reverse=True)
+    return candidates[:top_n]
+
+
+def screen_crypto(top_n: int = 10, interval: str = '1d') -> list[dict]:
+    """Crypto screener using composite score with optional strategy signal."""
+    import config_cache
+    configs = config_cache.get_configs()
+    candidates = []
+    for ticker in CRYPTO_TICKERS:
+        try:
+            df = load_ticker_data(ticker, years=2, interval=interval)
+            if df is None or len(df) < MIN_BARS:
+                continue
+            cfg = configs.get(ticker)
+            if cfg and not cfg.get('fallback'):
+                df_titled = df.rename(columns=str.title)
+                regime = detect_regime(df_titled)
+                allowed = REGIME_STRATEGY_MAP.get(regime, [])
+                strategy = cfg.get('strategy', '')
+                if strategy in allowed or not allowed:
+                    try:
+                        metrics = _compute_optimized_score(df, strategy, cfg.get('params', {}), cfg)
+                        if metrics:
+                            candidates.append({'ticker': ticker, 'regime': regime, **metrics})
+                            continue
+                    except Exception:
+                        pass
+            metrics = _compute_score(df, min_price=CRYPTO_MIN_PRICE)
+            if metrics is not None:
+                candidates.append({'ticker': ticker, **metrics})
+        except Exception as e:
+            logger.debug(f'Crypto screener skip {ticker}: {e}')
+    candidates.sort(key=lambda x: x['score'], reverse=True)
+    return candidates[:top_n]
+
+
+def screen_optimized(top_n: int = 10, min_confidence: str = 'MEDIUM', interval: str = '1d') -> list[dict]:
+    """Strategy-signal screener using cached configs from strategy-service."""
+    import config_cache
+    configs = config_cache.get_configs()
+    if not configs:
+        return []
+    _conf_rank = {'HIGH': 2, 'MEDIUM': 1, 'LOW': 0}
+    min_rank = _conf_rank.get(min_confidence, 1)
+    candidates = []
+    for ticker, cfg in configs.items():
+        try:
+            if cfg.get('fallback') or not cfg.get('strategy'):
+                continue
+            if _conf_rank.get(cfg.get('confidence', 'LOW'), 0) < min_rank:
+                continue
+            df = load_ticker_data(ticker, years=2, interval=interval)
+            if df is None:
+                continue
+            regime = detect_regime(df.rename(columns=str.title))
+            preferred = REGIME_STRATEGY_MAP.get(regime, [])
+            chosen_cfg = cfg
+            for s in cfg.get('top3', []):
+                if s.get('strategy') in preferred:
+                    chosen_cfg = s
+                    break
+            metrics = _compute_optimized_score(df, chosen_cfg['strategy'],
+                                               chosen_cfg.get('params', {}), chosen_cfg)
+            if metrics is not None:
+                candidates.append({'ticker': ticker, 'regime': regime, **metrics})
+        except Exception as e:
+            logger.debug(f'Optimized screener skip {ticker}: {e}')
+    candidates.sort(key=lambda x: (_conf_rank.get(x.get('strategy_confidence', 'LOW'), 0),
+                                    x['score']), reverse=True)
+    return candidates[:top_n]
+
+
+def screen_combined(top_n: int = 10, min_confidence: str = 'MEDIUM', interval: str = '1d') -> list[dict]:
+    """Run all 4 modes, merge, boost multi-screener hits."""
+    _conf_rank = {'HIGH': 2, 'MEDIUM': 1, 'LOW': 0}
+    all_results: dict[str, dict] = {}
+
+    def _merge(candidates: list[dict], screener_name: str) -> None:
+        for c in candidates:
+            t = c['ticker']
+            if t in all_results:
+                all_results[t]['screeners_matched'].append(screener_name)
+                all_results[t]['signal_count'] += 1
+                if c.get('score', 0) > all_results[t].get('score', 0):
+                    all_results[t]['score'] = c['score']
+            else:
+                all_results[t] = {**c, 'screeners_matched': [screener_name], 'signal_count': 1}
+
+    try:
+        _merge(screen(top_n=50, interval=interval), 'MOMENTUM')
+    except Exception as e:
+        logger.debug(f'screen_combined: MOMENTUM error: {e}')
+    try:
+        _merge(screen_breakout(top_n=20, interval=interval), 'BREAKOUT')
+    except Exception as e:
+        logger.debug(f'screen_combined: BREAKOUT error: {e}')
+    try:
+        _merge(screen_optimized(top_n=20, min_confidence=min_confidence, interval=interval), 'OPTIMIZED')
+    except Exception as e:
+        logger.debug(f'screen_combined: OPTIMIZED error: {e}')
+    try:
+        _merge(screen_dip(top_n=20, interval=interval), 'DIP')
+    except Exception as e:
+        logger.debug(f'screen_combined: DIP error: {e}')
+
+    combined = list(all_results.values())
+    combined.sort(key=lambda x: (x['signal_count'],
+                                  _conf_rank.get(x.get('strategy_confidence', 'LOW'), 0),
+                                  x.get('score', 0)), reverse=True)
+    return combined[:top_n]
