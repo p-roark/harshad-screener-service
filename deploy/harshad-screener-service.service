@@ -1,0 +1,20 @@
+[Unit]
+Description=Harshad Screener Service
+After=network.target
+
+[Service]
+Type=simple
+User=patilp
+WorkingDirectory=/home/patilp/harshad-screener-service
+ExecStart=/home/patilp/harshad-screener-service/venv/bin/python -u main.py
+Restart=on-failure
+RestartSec=10
+Environment=DATA_CACHE_PATH=/mnt/claude-code/sessions/claude-broker/workspace/trading/data_cache
+Environment=STRATEGY_SERVICE_URL=http://localhost:8003
+Environment=PORT=8006
+Environment=BIND_HOST=127.0.0.1
+StandardOutput=append:/var/log/trading-bot/screener-service.log
+StandardError=append:/var/log/trading-bot/screener-service.log
+
+[Install]
+WantedBy=multi-user.target
