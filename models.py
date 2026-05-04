@@ -3,8 +3,9 @@ from __future__ import annotations
 from typing import Literal, Optional
 from pydantic import BaseModel, field_validator
 
+
 class ScreenRequest(BaseModel):
-    mode: Literal['basic', 'dip', 'breakout', 'optimized', 'combined'] = 'combined'
+    mode: Literal['basic', 'dip', 'breakout', 'crypto', 'optimized', 'combined'] = 'combined'
     top_n: int = 10
     interval: Literal['1d', '1h'] = '1d'
     min_confidence: Literal['HIGH', 'MEDIUM', 'LOW'] = 'MEDIUM'
@@ -15,6 +16,7 @@ class ScreenRequest(BaseModel):
         if v < 1 or v > 50:
             raise ValueError('top_n must be between 1 and 50')
         return v
+
 
 class ScreenCandidate(BaseModel):
     ticker: str
@@ -32,6 +34,7 @@ class ScreenCandidate(BaseModel):
     strategy_name: Optional[str] = None
     strategy_confidence: Optional[str] = None
     regime: Optional[str] = None
+
 
 class ScreenResponse(BaseModel):
     mode: str

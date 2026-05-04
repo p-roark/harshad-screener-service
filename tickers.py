@@ -111,3 +111,25 @@ SMALLCAP_TICKERS = [
 
 ALL_TICKERS: list[str] = sorted(set(SP500_TICKERS + NDX100_TICKERS + MIDCAP_TICKERS + SMALLCAP_TICKERS))
 
+CRYPTO_TICKERS = [
+    'BTC-USD',   # Bitcoin
+    'ETH-USD',   # Ethereum
+    'SOL-USD',   # Solana
+    'BNB-USD',   # BNB
+    'XRP-USD',   # XRP
+    'ADA-USD',   # Cardano
+    'AVAX-USD',  # Avalanche
+    'DOGE-USD',  # Dogecoin
+    'DOT-USD',   # Polkadot
+    'LINK-USD',  # Chainlink
+    'LTC-USD',   # Litecoin
+    'NEAR-USD',  # NEAR Protocol
+    'UNI-USD',   # Uniswap
+    'ATOM-USD',  # Cosmos
+    'XLM-USD',   # Stellar
+    'ALGO-USD',  # Algorand
+    'FIL-USD',   # Filecoin
+    'APT-USD',   # Aptos
+    'ARB-USD',   # Arbitrum
+    'OP-USD',    # Optimism
+]

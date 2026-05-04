@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 from unittest.mock import patch, MagicMock
 
+
 def make_mock_df():
     import numpy as np
     n = 60
@@ -16,6 +17,7 @@ def make_mock_df():
         'Volume': [1_000_000] * n,
     })
     return df
+
 
 def test_load_ticker_data_uses_cache(tmp_path):
     """Returns cached data when cache file is fresh."""
@@ -32,6 +34,7 @@ def test_load_ticker_data_uses_cache(tmp_path):
     finally:
         data_module.CACHE_DIR = old_cache
 
+
 def test_load_ticker_data_returns_lowercase_columns(tmp_path):
     """Loaded data always has lowercase column names."""
     import data as data_module
@@ -47,8 +50,11 @@ def test_load_ticker_data_returns_lowercase_columns(tmp_path):
     finally:
         data_module.CACHE_DIR = old_cache
 
+
 def test_tickers_lists_not_empty():
     """All ticker lists have entries."""
+    from tickers import SP500_TICKERS, NDX100_TICKERS, CRYPTO_TICKERS, ALL_TICKERS
     assert len(SP500_TICKERS) > 50
     assert len(NDX100_TICKERS) > 50
+    assert len(CRYPTO_TICKERS) >= 10
     assert len(ALL_TICKERS) > 100
