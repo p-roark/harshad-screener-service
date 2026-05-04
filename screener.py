@@ -14,7 +14,6 @@ RSI_MIN, RSI_MAX = 35, 65
 VOLUME_RATIO_MIN = 1.2
 MIN_PRICE = 10.0
 MIN_BARS = 55
-CRYPTO_MIN_PRICE = 0.01
 DIP_RSI_MAX = 32
 DIP_VOL_MIN = 1.5
 DIP_MAX_DRAWDOWN = 0.35
@@ -31,7 +30,6 @@ REGIME_STRATEGY_MAP = {
                       'WILLIAMS_R', 'CCI_REVERT'],
     'HIGH_VOL':      ['MEAN_REVERT', 'RSI_2'],
 }
-
 
 # ── Regime detection ──────────────────────────────────────────────────────────
 
@@ -59,7 +57,6 @@ def detect_regime(df: pd.DataFrame) -> str:
         return 'RANGING'
     except Exception:
         return 'RANGING'
-
 
 # ── Composite score ───────────────────────────────────────────────────────────
 
@@ -108,7 +105,6 @@ def _compute_score(df: pd.DataFrame, min_price: float = MIN_PRICE) -> dict | Non
         'score': round(score, 4),
     }
 
-
 def _compute_breakout_score(df: pd.DataFrame) -> dict | None:
     """Breakout: new 20-day high + 2× volume + RSI 50-80."""
     if df is None or len(df) < MIN_BARS or len(df) < BREAKOUT_LOOKBACK + 1:
@@ -147,7 +143,6 @@ def _compute_breakout_score(df: pd.DataFrame) -> dict | None:
         'score': round(score, 4),
         'signal_type': 'BREAKOUT',
     }
-
 
 # ── Signal functions (ported from optimizer.py build_signal_fn) ───────────────
 
@@ -836,16 +831,12 @@ def build_signal_fn(strategy: str, params: dict) -> Callable:
 
     raise ValueError(f'Unknown strategy: {strategy}')
 
-
 # ── Screen functions ──────────────────────────────────────────────────────────
 
 from data import load_ticker_data
-from tickers import SP500_TICKERS, NDX100_TICKERS, MIDCAP_TICKERS, SMALLCAP_TICKERS, CRYPTO_TICKERS
-
 
 def _equity_tickers() -> list[str]:
     return list(set(SP500_TICKERS + NDX100_TICKERS + MIDCAP_TICKERS + SMALLCAP_TICKERS))
-
 
 def _compute_optimized_score(df: pd.DataFrame, strategy: str, params: dict, config: dict) -> dict | None:
     """Run strategy signal on last bar. df must have lowercase columns."""
@@ -877,7 +868,6 @@ def _compute_optimized_score(df: pd.DataFrame, strategy: str, params: dict, conf
         'strategy_confidence': config.get('confidence', 'LOW'),
     }
 
-
 def screen(top_n: int = 10, interval: str = '1d') -> list[dict]:
     """Basic composite screener across equity universe."""
     candidates = []
@@ -891,7 +881,6 @@ def screen(top_n: int = 10, interval: str = '1d') -> list[dict]:
             logger.debug(f'Screener skip {ticker}: {e}')
     candidates.sort(key=lambda x: x['score'], reverse=True)
     return candidates[:top_n]
-
 
 def screen_dip(top_n: int = 10, interval: str = '1d') -> list[dict]:
     """Dip-buy screener: oversold quality stocks during sell-offs."""
@@ -943,7 +932,6 @@ def screen_dip(top_n: int = 10, interval: str = '1d') -> list[dict]:
     candidates.sort(key=lambda x: x['score'], reverse=True)
     return candidates[:top_n]
 
-
 def screen_breakout(top_n: int = 5, interval: str = '1d') -> list[dict]:
     """Breakout: new 20-bar high + 2× volume + RSI 50-80."""
     candidates = []
@@ -957,40 +945,6 @@ def screen_breakout(top_n: int = 5, interval: str = '1d') -> list[dict]:
             logger.debug(f'Breakout screener skip {ticker}: {e}')
     candidates.sort(key=lambda x: x['score'], reverse=True)
     return candidates[:top_n]
-
-
-def screen_crypto(top_n: int = 10, interval: str = '1d') -> list[dict]:
-    """Crypto screener using composite score with optional strategy signal."""
-    import config_cache
-    configs = config_cache.get_configs()
-    candidates = []
-    for ticker in CRYPTO_TICKERS:
-        try:
-            df = load_ticker_data(ticker, years=2, interval=interval)
-            if df is None or len(df) < MIN_BARS:
-                continue
-            cfg = configs.get(ticker)
-            if cfg and not cfg.get('fallback'):
-                df_titled = df.rename(columns=str.title)
-                regime = detect_regime(df_titled)
-                allowed = REGIME_STRATEGY_MAP.get(regime, [])
-                strategy = cfg.get('strategy', '')
-                if strategy in allowed or not allowed:
-                    try:
-                        metrics = _compute_optimized_score(df, strategy, cfg.get('params', {}), cfg)
-                        if metrics:
-                            candidates.append({'ticker': ticker, 'regime': regime, **metrics})
-                            continue
-                    except Exception:
-                        pass
-            metrics = _compute_score(df, min_price=CRYPTO_MIN_PRICE)
-            if metrics is not None:
-                candidates.append({'ticker': ticker, **metrics})
-        except Exception as e:
-            logger.debug(f'Crypto screener skip {ticker}: {e}')
-    candidates.sort(key=lambda x: x['score'], reverse=True)
-    return candidates[:top_n]
-
 
 def screen_optimized(top_n: int = 10, min_confidence: str = 'MEDIUM', interval: str = '1d') -> list[dict]:
     """Strategy-signal screener using cached configs from strategy-service."""
@@ -1026,7 +980,6 @@ def screen_optimized(top_n: int = 10, min_confidence: str = 'MEDIUM', interval: 
     candidates.sort(key=lambda x: (_conf_rank.get(x.get('strategy_confidence', 'LOW'), 0),
                                     x['score']), reverse=True)
     return candidates[:top_n]
-
 
 def screen_combined(top_n: int = 10, min_confidence: str = 'MEDIUM', interval: str = '1d') -> list[dict]:
     """Run all 4 modes, merge, boost multi-screener hits."""

@@ -10,7 +10,6 @@ _SCREEN_FN = {
     'basic':     lambda req: screener.screen(top_n=req.top_n, interval=req.interval),
     'dip':       lambda req: screener.screen_dip(top_n=req.top_n, interval=req.interval),
     'breakout':  lambda req: screener.screen_breakout(top_n=req.top_n, interval=req.interval),
-    'crypto':    lambda req: screener.screen_crypto(top_n=req.top_n, interval=req.interval),
     'optimized': lambda req: screener.screen_optimized(top_n=req.top_n,
                                                         min_confidence=req.min_confidence,
                                                         interval=req.interval),
@@ -18,7 +17,6 @@ _SCREEN_FN = {
                                                        min_confidence=req.min_confidence,
                                                        interval=req.interval),
 }
-
 
 @router.post('/screen', response_model=ScreenResponse)
 def run_screen(body: ScreenRequest):
